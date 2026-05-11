@@ -24,14 +24,8 @@ export const proxy = hasClerkKeys
         await auth.protect();
       }
     })
-  : (req: Request) => {
-      // Dev mode without Clerk: redirect dashboard routes to landing
-      const url = new URL(req.url);
-      const isDashboard =
-        !isPublicRoute({ url, nextUrl: url } as Parameters<typeof isPublicRoute>[0]);
-      if (isDashboard) {
-        return NextResponse.redirect(new URL("/?setup=true", req.url));
-      }
+  : (_req: Request) => {
+      // Dev mode without Clerk: allow all routes through (no auth enforcement)
     };
 
 export const config = {

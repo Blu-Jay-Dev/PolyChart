@@ -20,7 +20,17 @@ export interface Market {
   competitive: number;
   createdAt: string;
   updatedAt: string;
-  tokens: MarketToken[];
+  // Gamma API returns these as JSON strings (parse before use)
+  clobTokenIds?: string; // JSON string: ["tokenId1", "tokenId2"]
+  outcomes?: string;     // JSON string: ["Yes", "No"] or ["Up", "Down"]
+  // Pricing fields from Gamma API
+  lastTradePrice?: number;
+  bestBid?: number;
+  bestAsk?: number;
+  oneDayPriceChange?: number;
+  oneWeekPriceChange?: number;
+  // Legacy tokens field (not returned by Gamma API, kept for compatibility)
+  tokens?: MarketToken[];
   resolutionSource?: string;
   resolutionDate?: string;
   clearBookOnClose?: boolean;

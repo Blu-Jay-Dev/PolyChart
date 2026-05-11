@@ -11,9 +11,14 @@ import {
   Settings,
   Star,
   TrendingUp,
+  User,
 } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
+
+const hasClerkKeys =
+  !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY &&
+  !process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY.includes("placeholder");
 
 const NAV_ITEMS = [
   { href: "/markets", label: "Markets", icon: BarChart2 },
@@ -87,13 +92,17 @@ export function Sidebar() {
           );
         })}
         <div className="flex items-center gap-2.5 px-2.5 py-2">
-          <UserButton
-            appearance={{
-              elements: {
-                avatarBox: "h-5 w-5",
-              },
-            }}
-          />
+          {hasClerkKeys ? (
+            <UserButton
+              appearance={{
+                elements: {
+                  avatarBox: "h-5 w-5",
+                },
+              }}
+            />
+          ) : (
+            <User className="h-5 w-5 text-slate-600" />
+          )}
           <span className="text-xs text-slate-600">Account</span>
         </div>
       </div>

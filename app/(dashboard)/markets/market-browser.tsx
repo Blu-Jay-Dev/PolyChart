@@ -2,10 +2,9 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { Search, Star, StarOff, TrendingUp, TrendingDown } from "lucide-react";
+import { Search, Star, StarOff } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
 import { Sparkline } from "@/components/charts/sparkline";
 import { formatVolume, formatPrice, formatRelativeTime, categoryColor } from "@/lib/utils";
 import type { Market } from "@/lib/polymarket/types";
@@ -81,8 +80,28 @@ export function MarketBrowser() {
     }
   };
 
-  const yesToken = (m: Market) =>
-    m.tokens?.find((t) => t.outcome === "Yes") ?? m.tokens?.[0];
+  // Parse clobTokenIds and outcomes from JSON strings returned by Gamma API
+  const yesTokenInfo = (m: Market): { token_id: string; price: number } | null => {
+    // Prefer legacy tokens array if present
+    if (m.tokens && m.tokens.length > 0) {
+      const t = m.tokens.find((t) => t.outcome === "Yes") ?? m.tokens![0];
+      return { token_id: t.token_id, price: t.price };
+    }
+    // Parse Gamma API fields
+    try {
+      const ids: string[] = JSON.parse(m.clobTokenIds ?? "[]");
+      const outcomes: string[] = JSON.parse(m.outcomes ?? "[]");
+      if (ids.length === 0) return null;
+      const yesIdx = outcomes.findIndex((o) => o.toLowerCase() === "yes");
+      const idx = yesIdx >= 0 ? yesIdx : 0;
+      return {
+        token_id: ids[idx],
+        price: m.lastTradePrice ?? (m.bestBid && m.bestAsk ? (m.bestBid + m.bestAsk) / 2 : 0),
+      };
+    } catch {
+      return null;
+    }
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -147,11 +166,10 @@ export function MarketBrowser() {
           </div>
         ) : (
           markets.map((market) => {
-            const token = yesToken(market);
+            const token = yesTokenInfo(market);
             if (!token) return null;
             const tokenId = token.token_id;
             const price = token.price ?? 0;
-            const is24hPositive = true; // would need historical data for actual direction
 
             return (
               <div
