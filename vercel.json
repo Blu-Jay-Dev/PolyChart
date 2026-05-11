@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/build-ohlc",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/alerts/eval",
+      "schedule": "*/1 * * * *"
+    }
+  ]
+}
