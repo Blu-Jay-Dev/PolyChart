@@ -179,7 +179,7 @@ export function MarketBrowser() {
                 {/* Title + category */}
                 <div className="flex flex-col justify-center min-w-0">
                   <Link
-                    href={`/market/${tokenId}`}
+                    href={`/market/${market.id}`}
                     className="text-sm text-slate-200 hover:text-blue-400 truncate transition-colors"
                   >
                     {market.question}

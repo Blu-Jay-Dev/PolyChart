@@ -55,8 +55,8 @@ export async function getTrades(params: {
 }
 
 export function computeSpread(book: OrderBook): SpreadInfo {
-  const topBid = book.bids[0] ? parseFloat(book.bids[0].price) : 0;
-  const topAsk = book.asks[0] ? parseFloat(book.asks[0].price) : 1;
+  const topBid = book?.bids?.[0] ? parseFloat(book.bids[0].price) : 0;
+  const topAsk = book?.asks?.[0] ? parseFloat(book.asks[0].price) : 1;
   return {
     bid: topBid,
     ask: topAsk,

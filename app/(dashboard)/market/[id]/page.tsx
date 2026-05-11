@@ -32,9 +32,22 @@ export default async function MarketPage({ params }: PageProps) {
     notFound();
   }
 
-  const yesToken =
-    market.tokens?.find((t) => t.outcome === "Yes") ?? market.tokens?.[0];
-  const tokenId = yesToken?.token_id ?? id;
+  // Extract the "Yes" token ID from either the legacy tokens array
+  // or the Gamma API's clobTokenIds/outcomes JSON strings
+  let tokenId = id;
+  if (market.tokens && market.tokens.length > 0) {
+    const t = market.tokens.find((t) => t.outcome === "Yes") ?? market.tokens![0];
+    tokenId = t.token_id;
+  } else if (market.clobTokenIds) {
+    try {
+      const ids: string[] = JSON.parse(market.clobTokenIds);
+      const outcomes: string[] = market.outcomes ? JSON.parse(market.outcomes) : [];
+      const yesIdx = outcomes.findIndex((o) => o.toLowerCase() === "yes");
+      tokenId = ids[yesIdx >= 0 ? yesIdx : 0] ?? id;
+    } catch {
+      tokenId = id;
+    }
+  }
 
   return (
     <div className="flex flex-col h-screen overflow-hidden">

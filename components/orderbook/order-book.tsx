@@ -24,8 +24,8 @@ export function OrderBook({ tokenId }: OrderBookProps) {
   useEffect(() => {
     // Fetch initial book
     fetch(`/api/orderbook/${tokenId}`)
-      .then((r) => r.json())
-      .then(setData)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d?.book) setData(d); })
       .catch(() => {});
 
     // Start SSE stream
