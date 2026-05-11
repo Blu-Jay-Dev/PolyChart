@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
-import { ClerkProvider } from "@clerk/nextjs";
 import { ToastProvider } from "@/components/ui/toast";
 import "./globals.css";
 
@@ -27,12 +26,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <ClerkProvider>
-      <html lang="en" className={`${inter.variable} h-full`}>
-        <body className="min-h-full bg-[#0d0f12] text-slate-200 antialiased">
-          <ToastProvider>{children}</ToastProvider>
-        </body>
-      </html>
-    </ClerkProvider>
+    <html lang="en" className={`${inter.variable} h-full`}>
+      <body className="min-h-full bg-[#0d0f12] text-slate-200 antialiased">
+        <ToastProvider>{children}</ToastProvider>
+      </body>
+    </html>
   );
 }
