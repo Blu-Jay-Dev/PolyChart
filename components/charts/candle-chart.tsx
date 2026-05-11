@@ -46,7 +46,14 @@ export function CandleChart({ tokenId, title }: CandleChartProps) {
     try {
       const res = await fetch(`/api/ohlc/${tokenId}?tf=${timeframe}`);
       const data = await res.json();
-      setBars(Array.isArray(data) ? data : []);
+      const raw: OHLCBar[] = Array.isArray(data) ? data : [];
+      // lightweight-charts requires strictly ascending time order
+      const sorted = [...raw].sort((a, b) => a.time - b.time);
+      // Deduplicate bars with identical timestamps (keep last)
+      const deduped = sorted.filter(
+        (b, i) => i === 0 || b.time !== sorted[i - 1].time
+      );
+      setBars(deduped);
     } catch {
       setBars([]);
     } finally {
@@ -162,39 +169,54 @@ export function CandleChart({ tokenId, title }: CandleChartProps) {
   useEffect(() => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
 
-    const candleData: CandlestickData[] = bars.map((b) => ({
-      time: b.time as unknown as CandlestickData["time"],
-      open: b.open,
-      high: b.high,
-      low: b.low,
-      close: b.close,
-    }));
+    try {
+      const candleData: CandlestickData[] = bars.map((b) => ({
+        time: b.time as unknown as CandlestickData["time"],
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+      }));
 
-    const volumeData: HistogramData[] = bars.map((b) => ({
-      time: b.time as unknown as HistogramData["time"],
-      value: b.volume,
-      color: b.close >= b.open ? "#22c55e30" : "#ef444430",
-    }));
+      const volumeData: HistogramData[] = bars.map((b) => ({
+        time: b.time as unknown as HistogramData["time"],
+        value: b.volume,
+        color: b.close >= b.open ? "#22c55e30" : "#ef444430",
+      }));
 
-    candleSeriesRef.current.setData(candleData);
-    volumeSeriesRef.current.setData(volumeData);
+      candleSeriesRef.current.setData(candleData);
+      volumeSeriesRef.current.setData(volumeData);
 
-    // Update SMA series
-    SMA_PERIODS.forEach((period, i) => {
-      const series = smaSeriesRefs.current[i];
-      if (!series) return;
+      // Update SMA series
+      SMA_PERIODS.forEach((period, i) => {
+        const series = smaSeriesRefs.current[i];
+        if (!series) return;
 
-      const smaData = computeSMA(bars, period);
-      series.setData(
-        smaData.map((d) => ({
-          time: d.time as unknown as LineData["time"],
-          value: d.value,
-        }))
-      );
-      series.applyOptions({ visible: activeSMAs.has(period) });
-    });
+        const smaData = computeSMA(bars, period);
+        try {
+          series.setData(
+            smaData.map((d) => ({
+              time: d.time as unknown as LineData["time"],
+              value: d.value,
+            }))
+          );
+        } catch {
+          // SMA set failed (e.g. timestamp issue) — skip overlay
+        }
+        series.applyOptions({ visible: activeSMAs.has(period) });
+      });
 
-    chartRef.current?.timeScale().fitContent();
+      chartRef.current?.timeScale().fitContent();
+    } catch (err) {
+      console.warn("[CandleChart] setData error:", err);
+      // Clear all series on bad data to avoid crash
+      try {
+        candleSeriesRef.current?.setData([]);
+        volumeSeriesRef.current?.setData([]);
+      } catch {
+        // ignore
+      }
+    }
   }, [bars, activeSMAs]);
 
   const toggleSMA = (period: number) => {
