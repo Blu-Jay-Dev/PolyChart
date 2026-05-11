@@ -3,7 +3,9 @@ import { createServerClient } from "@/lib/supabase/server";
 import { cacheGet } from "@/lib/redis";
 import { Resend } from "resend";
 
-const resend = new Resend(process.env.RESEND_API_KEY!);
+function getResend() {
+  return new Resend(process.env.RESEND_API_KEY!);
+}
 
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get("authorization");
@@ -73,6 +75,7 @@ export async function GET(req: NextRequest) {
         alert.users?.email
       ) {
         try {
+          const resend = getResend();
           await resend.emails.send({
             from: process.env.RESEND_FROM_EMAIL!,
             to: alert.users.email,

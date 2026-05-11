@@ -3,9 +3,11 @@ import { auth } from "@clerk/nextjs/server";
 import Stripe from "stripe";
 import { createServerClient } from "@/lib/supabase/server";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2026-04-22.dahlia",
-});
+function getStripe() {
+  return new Stripe(process.env.STRIPE_SECRET_KEY!, {
+    apiVersion: "2026-04-22.dahlia",
+  });
+}
 
 export async function POST(req: NextRequest) {
   const { userId } = await auth();
@@ -13,6 +15,7 @@ export async function POST(req: NextRequest) {
 
   const { action } = await req.json();
   const supabase = createServerClient();
+  const stripe = getStripe();
 
   const { data: user } = await supabase
     .from("users")
