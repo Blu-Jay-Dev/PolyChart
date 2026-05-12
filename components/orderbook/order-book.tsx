@@ -37,16 +37,23 @@ export function OrderBook({ tokenId }: OrderBookProps) {
         const msg = JSON.parse(event.data);
 
         if (msg.type === "book") {
+          // Normalise: bids desc (best first), asks asc (best first)
+          const bids = [...(msg.bids ?? [])].sort(
+            (a: { price: string }, b: { price: string }) => parseFloat(b.price) - parseFloat(a.price)
+          );
+          const asks = [...(msg.asks ?? [])].sort(
+            (a: { price: string }, b: { price: string }) => parseFloat(a.price) - parseFloat(b.price)
+          );
           const book: OrderBookType = {
             market: msg.market,
             asset_id: msg.asset_id,
             hash: msg.hash,
             timestamp: msg.timestamp,
-            bids: msg.bids ?? [],
-            asks: msg.asks ?? [],
+            bids,
+            asks,
           };
-          const topBid = book.bids[0] ? parseFloat(book.bids[0].price) : 0;
-          const topAsk = book.asks[0] ? parseFloat(book.asks[0].price) : 1;
+          const topBid = bids[0] ? parseFloat(bids[0].price) : 0;
+          const topAsk = asks[0] ? parseFloat(asks[0].price) : 1;
           const spread: SpreadInfo = {
             bid: topBid,
             ask: topAsk,

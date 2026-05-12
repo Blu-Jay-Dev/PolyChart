@@ -39,6 +39,7 @@ export async function getMarkets(params?: {
   closed?: boolean;
   category?: string;
   order?: string;
+  volumeMin?: number;
 }): Promise<Market[]> {
   return gammaFetch<Market[]>("/markets", {
     limit: params?.limit ?? 100,
@@ -47,6 +48,8 @@ export async function getMarkets(params?: {
     ...(params?.closed !== undefined ? { closed: params.closed } : {}),
     ...(params?.category ? { category: params.category } : {}),
     ...(params?.order ? { order: params.order } : {}),
+    // Filter out zero-volume resolved markets; default 1000 USD
+    volume_num_min: params?.volumeMin ?? 1000,
   });
 }
 

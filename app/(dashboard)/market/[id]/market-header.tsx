@@ -17,9 +17,14 @@ interface MarketHeaderProps {
 export function MarketHeader({ market, tokenId }: MarketHeaderProps) {
   const [watching, setWatching] = useState(false);
 
-  const yesToken =
-    market.tokens?.find((t) => t.outcome === "Yes") ?? market.tokens?.[0];
-  const price = yesToken?.price ?? 0;
+  // Gamma API returns pricing directly; tokens[] is legacy
+  const yesToken = market.tokens?.find((t) => t.outcome === "Yes") ?? market.tokens?.[0];
+  const price =
+    yesToken?.price ??
+    market.lastTradePrice ??
+    (market.bestBid != null && market.bestAsk != null
+      ? (market.bestBid + market.bestAsk) / 2
+      : 0);
 
   const toggleWatch = async () => {
     if (watching) {
@@ -75,8 +80,21 @@ export function MarketHeader({ market, tokenId }: MarketHeaderProps) {
         {/* Right side: price + actions */}
         <div className="flex items-center gap-4 shrink-0">
           <div className="text-right">
-            <div className="font-data text-2xl font-bold text-slate-100">
-              {(price * 100).toFixed(1)}%
+            <div className="flex items-baseline gap-2">
+              <div className="font-data text-2xl font-bold text-slate-100">
+                {(price * 100).toFixed(1)}%
+              </div>
+              {market.oneDayPriceChange != null && (
+                <div
+                  className={cn(
+                    "font-data text-sm",
+                    market.oneDayPriceChange >= 0 ? "text-green-400" : "text-red-400"
+                  )}
+                >
+                  {market.oneDayPriceChange >= 0 ? "+" : ""}
+                  {(market.oneDayPriceChange * 100).toFixed(1)}%
+                </div>
+              )}
             </div>
             <div className="text-xs text-slate-500">
               YES · Vol {formatVolume(market.volume24hr ?? 0)} / 24h

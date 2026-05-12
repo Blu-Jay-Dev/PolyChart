@@ -55,8 +55,12 @@ export async function getTrades(params: {
 }
 
 export function computeSpread(book: OrderBook): SpreadInfo {
-  const topBid = book?.bids?.[0] ? parseFloat(book.bids[0].price) : 0;
-  const topAsk = book?.asks?.[0] ? parseFloat(book.asks[0].price) : 1;
+  // CLOB returns bids ascending (lowest first) and asks descending (highest first)
+  // Best bid = max price in bids, best ask = min price in asks
+  const bidPrices = book?.bids?.map((l) => parseFloat(l.price)) ?? [];
+  const askPrices = book?.asks?.map((l) => parseFloat(l.price)) ?? [];
+  const topBid = bidPrices.length > 0 ? Math.max(...bidPrices) : 0;
+  const topAsk = askPrices.length > 0 ? Math.min(...askPrices) : 1;
   return {
     bid: topBid,
     ask: topAsk,

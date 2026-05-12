@@ -14,21 +14,24 @@ interface DepthChartProps {
 }
 
 function buildCumulativeDepth(book: OrderBook) {
-  // Bids: sorted desc by price (highest first), cumulate from top
+  // Bids: sorted desc by price (best bid first) for cumulation, then reversed for chart
   const bids = book.bids
     .map((l) => ({ price: parseFloat(l.price), size: parseFloat(l.size) }))
     .sort((a, b) => b.price - a.price);
 
-  // Asks: sorted asc by price (lowest first), cumulate from top
+  // Asks: sorted asc by price (best ask first) for cumulation
   const asks = book.asks
     .map((l) => ({ price: parseFloat(l.price), size: parseFloat(l.size) }))
     .sort((a, b) => a.price - b.price);
 
   let cumBid = 0;
-  const bidDepth = bids.map((l) => {
-    cumBid += l.size;
-    return { price: l.price, cumulative: cumBid };
-  });
+  // Build descending, then reverse so time axis (price) is strictly ascending
+  const bidDepth = bids
+    .map((l) => {
+      cumBid += l.size;
+      return { price: l.price, cumulative: cumBid };
+    })
+    .reverse(); // now ascending by price → ascending time axis
 
   let cumAsk = 0;
   const askDepth = asks.map((l) => {
@@ -104,45 +107,50 @@ export function DepthChart({ tokenId }: DepthChartProps) {
 
     const { bidDepth, askDepth } = buildCumulativeDepth(book);
 
-    if (bidDepth.length > 0) {
-      const bidSeries = chart.addSeries(AreaSeries, {
-        lineColor: "#22c55e",
-        topColor: "#22c55e30",
-        bottomColor: "#22c55e05",
-        lineWidth: 1,
-        priceLineVisible: false,
-        lastValueVisible: false,
-      });
+    // Map price → integer "time" (use 10000x for 4-decimal precision)
+    // Data must be strictly ascending by this value — bidDepth is pre-sorted ascending
+    const toTime = (price: number) => Math.round(price * 10000);
 
-      // Use price as X — lightweight-charts uses time axis, so we map price * 1000 as fake time
-      bidSeries.setData(
-        bidDepth.map((d) => ({
-          time: Math.round(d.price * 1000) as unknown as Parameters<
-            typeof bidSeries.setData
-          >[0][number]["time"],
-          value: d.cumulative,
-        }))
-      );
-    }
+    try {
+      if (bidDepth.length > 0) {
+        const bidSeries = chart.addSeries(AreaSeries, {
+          lineColor: "#22c55e",
+          topColor: "#22c55e30",
+          bottomColor: "#22c55e05",
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+        bidSeries.setData(
+          bidDepth.map((d) => ({
+            time: toTime(d.price) as unknown as Parameters<
+              typeof bidSeries.setData
+            >[0][number]["time"],
+            value: d.cumulative,
+          }))
+        );
+      }
 
-    if (askDepth.length > 0) {
-      const askSeries = chart.addSeries(AreaSeries, {
-        lineColor: "#ef4444",
-        topColor: "#ef444430",
-        bottomColor: "#ef444405",
-        lineWidth: 1,
-        priceLineVisible: false,
-        lastValueVisible: false,
-      });
-
-      askSeries.setData(
-        askDepth.map((d) => ({
-          time: Math.round(d.price * 1000) as unknown as Parameters<
-            typeof askSeries.setData
-          >[0][number]["time"],
-          value: d.cumulative,
-        }))
-      );
+      if (askDepth.length > 0) {
+        const askSeries = chart.addSeries(AreaSeries, {
+          lineColor: "#ef4444",
+          topColor: "#ef444430",
+          bottomColor: "#ef444405",
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+        askSeries.setData(
+          askDepth.map((d) => ({
+            time: toTime(d.price) as unknown as Parameters<
+              typeof askSeries.setData
+            >[0][number]["time"],
+            value: d.cumulative,
+          }))
+        );
+      }
+    } catch (err) {
+      console.warn("[DepthChart] setData error:", err);
     }
 
     chart.timeScale().fitContent();

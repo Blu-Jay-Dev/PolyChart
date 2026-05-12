@@ -8,7 +8,13 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const book = await getOrderBook(id);
+    const raw = await getOrderBook(id);
+    // CLOB returns bids asc / asks desc — normalise to standard order book order
+    const book = {
+      ...raw,
+      bids: [...(raw.bids ?? [])].sort((a, b) => parseFloat(b.price) - parseFloat(a.price)),
+      asks: [...(raw.asks ?? [])].sort((a, b) => parseFloat(a.price) - parseFloat(b.price)),
+    };
     const spread = computeSpread(book);
 
     return NextResponse.json(
