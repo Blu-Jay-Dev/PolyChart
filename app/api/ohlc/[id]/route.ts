@@ -1,18 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { TimeFrame, OHLCBar } from "@/lib/polymarket/types";
-import { HAS_CLOB_AUTH, buildClobHeaders } from "@/lib/polymarket/clob-auth";
 
-const CLOB_BASE = "https://clob.polymarket.com";
+const CLOB_BASE     = "https://clob.polymarket.com";
+const GAMMA_BASE    = "https://gamma-api.polymarket.com";
+const DATA_API_BASE = "https://data-api.polymarket.com";
 
-// Map our timeframes to CLOB prices-history parameters
+// Map timeframes to CLOB prices-history parameters
 const TF_PARAMS: Record<TimeFrame, { interval: string; fidelity: number }> = {
-  "1H":  { interval: "1w",  fidelity: 60   }, // 1 week of hourly data
-  "4H":  { interval: "1w",  fidelity: 240  }, // 1 week of 4-hour data
-  "1D":  { interval: "max", fidelity: 1440 }, // All-time daily data
-  "1W":  { interval: "max", fidelity: 1440 }, // All-time daily (client groups to weekly)
+  "1H":  { interval: "1w",  fidelity: 60   },
+  "4H":  { interval: "1w",  fidelity: 240  },
+  "1D":  { interval: "max", fidelity: 1440 },
+  "1W":  { interval: "max", fidelity: 1440 },
 };
 
-// Bar duration in seconds per timeframe (used to bucket trades)
+// Bar duration in seconds per timeframe
 const TF_INTERVAL_S: Record<TimeFrame, number> = {
   "1H":  3_600,
   "4H":  14_400,
@@ -20,74 +21,62 @@ const TF_INTERVAL_S: Record<TimeFrame, number> = {
   "1W":  7 * 86_400,
 };
 
-interface PricePoint {
-  t: number; // unix seconds
-  p: number; // price (0–1)
-}
+interface PricePoint { t: number; p: number; }
 
-interface TradeRecord {
-  match_time: string; // ISO timestamp
-  size: string;       // USDC notional
+// data-api trade shape
+interface DataApiTrade {
+  asset:       string;
+  conditionId: string;
+  size:        number;   // already a number (USDC)
+  price:       number;
+  timestamp:   number;   // unix seconds
+  side:        "BUY" | "SELL";
+  outcome:     string;
 }
-
-interface TradesPage {
-  data: TradeRecord[];
-  count: number;
-  limit: number;
-  next_cursor: string;
-}
-
-const END_CURSOR = "LTE="; // base64("-1") signals last page
 
 // ─── Price history ────────────────────────────────────────────────────────────
 
 async function fetchPriceHistory(tokenId: string, tf: TimeFrame): Promise<PricePoint[]> {
   const { interval, fidelity } = TF_PARAMS[tf];
   const url = `${CLOB_BASE}/prices-history?market=${tokenId}&interval=${interval}&fidelity=${fidelity}`;
-
-  const res = await fetch(url, {
-    headers: { "Accept": "application/json" },
-    next: { revalidate: 30 },
-  });
-
+  const res = await fetch(url, { headers: { Accept: "application/json" }, next: { revalidate: 30 } });
   if (!res.ok) return [];
   const data = await res.json();
   return Array.isArray(data.history) ? data.history : [];
 }
 
-// ─── Trades (authenticated) ───────────────────────────────────────────────────
+// ─── Condition ID lookup (needed to query data-api trades) ───────────────────
 
-async function fetchAllTrades(assetId: string, afterTs: number): Promise<TradeRecord[]> {
-  if (!HAS_CLOB_AUTH) return [];
+async function fetchConditionId(tokenId: string): Promise<string | null> {
+  const url = `${GAMMA_BASE}/markets?clobTokenIds=${tokenId}&limit=1`;
+  try {
+    const res = await fetch(url, { next: { revalidate: 3600 } }); // cache 1h
+    if (!res.ok) return null;
+    const markets = await res.json();
+    return markets?.[0]?.conditionId ?? null;
+  } catch {
+    return null;
+  }
+}
 
-  const all: TradeRecord[] = [];
-  let cursor = "";
+// ─── Trade volume from public data-api ───────────────────────────────────────
 
-  for (let page = 0; page < 20; page++) {
-    const qs = new URLSearchParams({
-      asset_id: assetId,
-      after:    String(afterTs),
-      limit:    "500",
-    });
-    if (cursor) qs.set("next_cursor", cursor);
+async function fetchAllTrades(conditionId: string): Promise<DataApiTrade[]> {
+  const all: DataApiTrade[] = [];
+  let offset = 0;
+  const LIMIT = 500;
 
-    const path = `/data/trades?${qs.toString()}`;
-    const res  = await fetch(`${CLOB_BASE}${path}`, {
-      headers: buildClobHeaders("GET", path),
-      next: { revalidate: 60 },
-    });
+  for (let page = 0; page < 40; page++) {
+    const url = `${DATA_API_BASE}/trades?market=${conditionId}&limit=${LIMIT}&offset=${offset}`;
+    const res = await fetch(url, { next: { revalidate: 60 } });
+    if (!res.ok) break;
 
-    if (!res.ok) {
-      console.warn("[/api/ohlc] trades fetch failed:", res.status);
-      break;
-    }
+    const trades: DataApiTrade[] = await res.json();
+    if (!Array.isArray(trades) || trades.length === 0) break;
 
-    const json: TradesPage = await res.json();
-    const page_trades = Array.isArray(json.data) ? json.data : [];
-    all.push(...page_trades);
-
-    if (!json.next_cursor || json.next_cursor === END_CURSOR || page_trades.length < 500) break;
-    cursor = json.next_cursor;
+    all.push(...trades);
+    if (trades.length < LIMIT) break; // last page
+    offset += LIMIT;
   }
 
   return all;
@@ -95,72 +84,44 @@ async function fetchAllTrades(assetId: string, afterTs: number): Promise<TradeRe
 
 // ─── OHLC construction ────────────────────────────────────────────────────────
 
-/**
- * Convert a price-history series into OHLC bars.
- * Each bar's open = previous bar's close; high/low derived from open↔close range.
- */
 function toOHLC(points: PricePoint[]): OHLCBar[] {
   if (points.length === 0) return [];
-
   const sorted = [...points].sort((a, b) => a.t - b.t);
-
   return sorted.map((pt, i) => {
     const open  = i === 0 ? pt.p : sorted[i - 1].p;
     const close = pt.p;
-    return {
-      time:   pt.t,
-      open,
-      close,
-      high:   Math.max(open, close),
-      low:    Math.min(open, close),
-      volume: 0,
-    };
+    return { time: pt.t, open, close, high: Math.max(open, close), low: Math.min(open, close), volume: 0 };
   });
 }
 
-/**
- * For 1W view, bucket daily bars into weekly bars.
- */
 function toWeeklyOHLC(daily: OHLCBar[]): OHLCBar[] {
   const WEEK_S = 7 * 24 * 3600;
   const buckets = new Map<number, OHLCBar[]>();
-
   for (const bar of daily) {
     const bucket = Math.floor(bar.time / WEEK_S) * WEEK_S;
     if (!buckets.has(bucket)) buckets.set(bucket, []);
     buckets.get(bucket)!.push(bar);
   }
-
   return Array.from(buckets.entries())
     .map(([t, bars]) => ({
-      time:   t,
-      open:   bars[0].open,
-      high:   Math.max(...bars.map((b) => b.high)),
-      low:    Math.min(...bars.map((b) => b.low)),
-      close:  bars[bars.length - 1].close,
-      volume: 0,
+      time: t, open: bars[0].open,
+      high: Math.max(...bars.map((b) => b.high)),
+      low:  Math.min(...bars.map((b) => b.low)),
+      close: bars[bars.length - 1].close, volume: 0,
     }))
     .sort((a, b) => a.time - b.time);
 }
 
-/**
- * Merge trade volume into OHLC bars by bucketing each trade into the bar
- * whose interval contains the trade's match_time.
- */
-function applyVolume(bars: OHLCBar[], trades: TradeRecord[], intervalS: number): void {
+function applyVolume(bars: OHLCBar[], trades: DataApiTrade[], intervalS: number): void {
   if (trades.length === 0) return;
-
   const volumeMap = new Map<number, number>();
-
   for (const t of trades) {
-    const ts     = Math.floor(new Date(t.match_time).getTime() / 1000);
-    const bucket = Math.floor(ts / intervalS) * intervalS;
-    volumeMap.set(bucket, (volumeMap.get(bucket) ?? 0) + parseFloat(t.size));
+    const bucket = Math.floor(t.timestamp / intervalS) * intervalS;
+    volumeMap.set(bucket, (volumeMap.get(bucket) ?? 0) + t.size);
   }
-
   for (const bar of bars) {
     const bucket = Math.floor(bar.time / intervalS) * intervalS;
-    bar.volume   = volumeMap.get(bucket) ?? 0;
+    bar.volume = volumeMap.get(bucket) ?? 0;
   }
 }
 
@@ -174,10 +135,10 @@ export async function GET(
   const tf = (req.nextUrl.searchParams.get("tf") ?? "1D") as TimeFrame;
 
   try {
-    // Fetch price history and trades concurrently
-    const [points, trades] = await Promise.all([
+    // Fetch price history and condition ID concurrently
+    const [points, conditionId] = await Promise.all([
       fetchPriceHistory(id, tf),
-      fetchAllTrades(id, 0), // 0 = no lower bound; rely on prices-history range
+      fetchConditionId(id),
     ]);
 
     if (points.length === 0) {
@@ -189,8 +150,11 @@ export async function GET(
     const daily = toOHLC(points);
     const bars  = tf === "1W" ? toWeeklyOHLC(daily) : daily;
 
-    // Attach real volume if we fetched trades
-    applyVolume(bars, trades, TF_INTERVAL_S[tf]);
+    // Fetch trades for volume (public endpoint, no auth needed)
+    if (conditionId) {
+      const trades = await fetchAllTrades(conditionId);
+      applyVolume(bars, trades, TF_INTERVAL_S[tf]);
+    }
 
     return NextResponse.json(bars, {
       headers: { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=30" },

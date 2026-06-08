@@ -30,31 +30,44 @@ export const HAS_CLOB_AUTH =
 
 function sign(
   secret: string,
-  timestamp: string,
+  timestamp: number,
   method: string,
   requestPath: string,
   body?: string
 ): string {
-  const rawSecret = Buffer.from(secret, "base64url");
+  // Secret is base64url-encoded; decode to raw bytes (convert - → + and _ → /)
+  const rawSecret = Buffer.from(
+    secret.replace(/-/g, "+").replace(/_/g, "/"),
+    "base64"
+  );
   let message = timestamp + method + requestPath;
-  if (body) message += body.replace(/'/g, '"');
-  return createHmac("sha256", rawSecret)
+  if (body) message += body;
+  // Sign → standard base64 → convert to url-safe but KEEP "=" padding (matches TS SDK)
+  const b64 = createHmac("sha256", rawSecret)
     .update(message, "utf8")
-    .digest("base64url");
+    .digest("base64");
+  return b64.replace(/\+/g, "-").replace(/\//g, "_");
 }
 
+/**
+ * Build authenticated headers for a CLOB request.
+ * @param method   HTTP method
+ * @param basePath Path WITHOUT query string (e.g. "/data/trades") — query params
+ *                 are excluded from the signature per the py-clob-client reference impl
+ * @param body     Request body for POST/DELETE (omit for GET)
+ */
 export function buildClobHeaders(
   method: "GET" | "POST" | "DELETE",
-  requestPath: string, // path + query string, e.g. "/data/trades?asset_id=..."
+  basePath: string,
   body?: string
 ): Record<string, string> {
-  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const ts = Math.floor(Date.now() / 1000);
   return {
-    "Content-Type":   "application/json",
-    "poly-address":   ADDRESS,
-    "poly-api-key":   API_KEY,
-    "poly-passphrase":PASSPHRASE,
-    "poly-signature": sign(SECRET, timestamp, method, requestPath, body),
-    "poly-timestamp": timestamp,
+    "Content-Type":    "application/json",
+    "POLY_ADDRESS":    ADDRESS,
+    "POLY_API_KEY":    API_KEY,
+    "POLY_PASSPHRASE": PASSPHRASE,
+    "POLY_SIGNATURE":  sign(SECRET, ts, method, basePath, body),
+    "POLY_TIMESTAMP":  String(ts),
   };
 }
