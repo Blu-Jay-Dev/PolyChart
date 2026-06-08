@@ -69,8 +69,23 @@ export function MarketHeader({ market, tokenId }: MarketHeaderProps) {
                 Closes {market.endDate ? formatRelativeTime(market.endDate) : "—"}
               </span>
               {market.resolutionSource && (
+                <span className="text-xs text-slate-600" title={`Resolved by: ${market.resolutionSource}`}>
+                  Oracle: <span className="text-slate-400">{market.resolutionSource}</span>
+                </span>
+              )}
+              {(market as unknown as { resolvedBy?: string }).resolvedBy && (
                 <span className="text-xs text-slate-600">
-                  Oracle: {market.resolutionSource}
+                  Resolver: <span className="text-slate-400">{(market as unknown as { resolvedBy?: string }).resolvedBy}</span>
+                </span>
+              )}
+              {(market as unknown as { umaResolutionStatus?: string }).umaResolutionStatus && (
+                <span className={cn(
+                  "text-xs px-1.5 py-0.5 rounded border",
+                  (market as unknown as { umaResolutionStatus?: string }).umaResolutionStatus === "resolved"
+                    ? "bg-green-500/10 text-green-400 border-green-500/20"
+                    : "bg-yellow-500/10 text-yellow-400 border-yellow-500/20"
+                )}>
+                  UMA: {(market as unknown as { umaResolutionStatus?: string }).umaResolutionStatus}
                 </span>
               )}
             </div>

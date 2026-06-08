@@ -78,3 +78,52 @@ export async function getEvents(params?: {
 export async function searchMarkets(query: string): Promise<Market[]> {
   return gammaFetch<Market[]>("/markets", { q: query, limit: 50 }, 30);
 }
+
+export async function getClosedMarkets(params?: {
+  limit?: number;
+  category?: string;
+  volumeMin?: number;
+}): Promise<Market[]> {
+  return gammaFetch<Market[]>(
+    "/markets",
+    {
+      limit: params?.limit ?? 30,
+      closed: true,
+      active: false,
+      order: "closedTime",
+      ascending: false,
+      volume_num_min: params?.volumeMin ?? 5000,
+      ...(params?.category ? { category: params.category } : {}),
+    },
+    300 // cache 5 min — resolved data is stable
+  );
+}
+
+/** Returns the winning outcome index (0 = first outcome won, 1 = second, -1 = unknown) */
+export function resolvedOutcomeIndex(market: Market): number {
+  try {
+    const prices: string[] = JSON.parse(
+      (market as unknown as { outcomePrices?: string }).outcomePrices ?? "[]"
+    );
+    const winIdx = prices.findIndex((p) => parseFloat(p) >= 0.9);
+    return winIdx;
+  } catch {
+    // Fallback: use lastTradePrice for YES token (index 0)
+    if (market.lastTradePrice != null) {
+      return market.lastTradePrice >= 0.9 ? 0 : 1;
+    }
+    return -1;
+  }
+}
+
+/** Returns the winning outcome label (e.g. "Yes" or "No") or null */
+export function resolvedOutcomeLabel(market: Market): string | null {
+  const idx = resolvedOutcomeIndex(market);
+  if (idx < 0) return null;
+  try {
+    const outcomes: string[] = JSON.parse(market.outcomes ?? "[]");
+    return outcomes[idx] ?? null;
+  } catch {
+    return idx === 0 ? "Yes" : "No";
+  }
+}

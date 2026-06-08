@@ -84,24 +84,28 @@ function setSeriesData<T>(
 
 export function CandleChart({ tokenId }: CandleChartProps) {
   // ── DOM refs ──────────────────────────────────────────────────────────────
-  const containerRef    = useRef<HTMLDivElement>(null);
-  const rsiContainerRef = useRef<HTMLDivElement>(null);
+  const containerRef      = useRef<HTMLDivElement>(null);
+  const rsiContainerRef   = useRef<HTMLDivElement>(null);
+  const deltaContainerRef = useRef<HTMLDivElement>(null);
 
   // ── Chart / series refs ───────────────────────────────────────────────────
-  const chartRef       = useRef<IChartApi | null>(null);
-  const rsiChartRef    = useRef<IChartApi | null>(null);
-  const candleRef      = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  const volumeRef      = useRef<ISeriesApi<"Histogram"> | null>(null);
-  const smaRefs        = useRef<Array<ISeriesApi<"Line">>>([]);
-  const emaRefs        = useRef<Array<ISeriesApi<"Line">>>([]);
+  const chartRef         = useRef<IChartApi | null>(null);
+  const rsiChartRef      = useRef<IChartApi | null>(null);
+  const deltaChartRef    = useRef<IChartApi | null>(null);
+  const candleRef        = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const volumeRef        = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const smaRefs          = useRef<Array<ISeriesApi<"Line">>>([]);
+  const emaRefs          = useRef<Array<ISeriesApi<"Line">>>([]);
   // BB: [upper, middle, lower]
-  const bbRefs         = useRef<Array<ISeriesApi<"Line">>>([]);
-  const rsiSeriesRef   = useRef<ISeriesApi<"Line"> | null>(null);
-  const rsiOBRef       = useRef<ISeriesApi<"Line"> | null>(null); // 70 line
-  const rsiOSRef       = useRef<ISeriesApi<"Line"> | null>(null); // 30 line
-  const priceLineRefs  = useRef<ReturnType<NonNullable<typeof candleRef.current>["createPriceLine"]>[]>([]);
-  const lastPriceRef   = useRef<number | null>(null);
-  const drawModeRef    = useRef<"none" | "hline">("none");
+  const bbRefs           = useRef<Array<ISeriesApi<"Line">>>([]);
+  const rsiSeriesRef     = useRef<ISeriesApi<"Line"> | null>(null);
+  const rsiOBRef         = useRef<ISeriesApi<"Line"> | null>(null); // 70 line
+  const rsiOSRef         = useRef<ISeriesApi<"Line"> | null>(null); // 30 line
+  const deltaSeriesRef   = useRef<ISeriesApi<"Line"> | null>(null);
+  const deltaHistRef     = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const priceLineRefs    = useRef<ReturnType<NonNullable<typeof candleRef.current>["createPriceLine"]>[]>([]);
+  const lastPriceRef     = useRef<number | null>(null);
+  const drawModeRef      = useRef<"none" | "hline">("none");
 
   // ── State ─────────────────────────────────────────────────────────────────
   const [timeframe,  setTimeframe]  = useState<TimeFrame>("1D");
@@ -112,6 +116,7 @@ export function CandleChart({ tokenId }: CandleChartProps) {
   const [showBB,     setShowBB]     = useState(false);
   const [showVol,    setShowVol]    = useState(true);
   const [showRSI,    setShowRSI]    = useState(false);
+  const [showDelta,  setShowDelta]  = useState(false);
   const [drawMode,   setDrawMode]   = useState<"none" | "hline">("none");
   const [hoverData,  setHoverData]  = useState<CandlestickData | null>(null);
 
@@ -252,15 +257,108 @@ export function CandleChart({ tokenId }: CandleChartProps) {
     return () => {
       observer.disconnect();
       chart.remove();
-      chartRef.current   = null;
-      candleRef.current  = null;
-      volumeRef.current  = null;
-      smaRefs.current    = [];
-      emaRefs.current    = [];
-      bbRefs.current     = [];
+      chartRef.current      = null;
+      candleRef.current     = null;
+      volumeRef.current     = null;
+      smaRefs.current       = [];
+      emaRefs.current       = [];
+      bbRefs.current        = [];
       priceLineRefs.current = [];
     };
   }, []);
+
+  // ── Delta sub-chart ───────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!showDelta || !deltaContainerRef.current || !chartRef.current) return;
+
+    const deltaChart = createChart(
+      deltaContainerRef.current,
+      CHART_OPTS(deltaContainerRef.current.clientWidth, deltaContainerRef.current.clientHeight)
+    );
+    deltaChart.applyOptions({
+      rightPriceScale: { scaleMargins: { top: 0.1, bottom: 0.1 } },
+      timeScale: { visible: false },
+    });
+    deltaChartRef.current = deltaChart;
+
+    // Histogram for per-bar delta
+    deltaHistRef.current = deltaChart.addSeries(HistogramSeries, {
+      priceScaleId: "right",
+      priceLineVisible: false, lastValueVisible: false,
+    });
+
+    // Cumulative delta line
+    deltaSeriesRef.current = deltaChart.addSeries(LineSeries, {
+      color: "#38bdf8", lineWidth: 1,
+      priceLineVisible: false, lastValueVisible: true,
+      priceScaleId: "left",
+    });
+    deltaChart.applyOptions({ leftPriceScale: { visible: true } });
+
+    // Sync with main chart time scale
+    let syncing = false;
+    const syncMain = (range: LogicalRange | null) => {
+      if (!range || syncing) return;
+      syncing = true;
+      deltaChart.timeScale().setVisibleLogicalRange(range);
+      syncing = false;
+    };
+    const syncDelta = (range: LogicalRange | null) => {
+      if (!range || syncing) return;
+      syncing = true;
+      chartRef.current?.timeScale().setVisibleLogicalRange(range);
+      syncing = false;
+    };
+    chartRef.current.timeScale().subscribeVisibleLogicalRangeChange(syncMain);
+    deltaChart.timeScale().subscribeVisibleLogicalRangeChange(syncDelta);
+
+    const observer = new ResizeObserver(() => {
+      if (deltaContainerRef.current)
+        deltaChart.applyOptions({
+          width:  deltaContainerRef.current.clientWidth,
+          height: deltaContainerRef.current.clientHeight,
+        });
+    });
+    observer.observe(deltaContainerRef.current);
+
+    return () => {
+      observer.disconnect();
+      chartRef.current?.timeScale().unsubscribeVisibleLogicalRangeChange(syncMain);
+      deltaChart.remove();
+      deltaChartRef.current  = null;
+      deltaSeriesRef.current = null;
+      deltaHistRef.current   = null;
+    };
+  }, [showDelta]);
+
+  // ── Fetch + update delta data ─────────────────────────────────────────────
+  useEffect(() => {
+    if (!showDelta || !deltaSeriesRef.current || !deltaHistRef.current) return;
+
+    fetch(`/api/delta/${tokenId}?tf=${timeframe}`)
+      .then((r) => r.json())
+      .then((data: Array<{ time: number; delta: number; cumDelta: number }>) => {
+        if (!Array.isArray(data) || data.length === 0) return;
+        try {
+          deltaHistRef.current?.setData(
+            data.map((d) => ({
+              time:  d.time as unknown as HistogramData["time"],
+              value: d.delta,
+              color: d.delta >= 0 ? "#22c55e50" : "#ef444450",
+            }))
+          );
+          deltaSeriesRef.current?.setData(
+            data.map((d) => ({
+              time:  d.time as unknown as LineData["time"],
+              value: d.cumDelta,
+            }))
+          );
+          const range = chartRef.current?.timeScale().getVisibleLogicalRange();
+          if (range) deltaChartRef.current?.timeScale().setVisibleLogicalRange(range);
+        } catch { /* ordering issue */ }
+      })
+      .catch(() => {});
+  }, [showDelta, tokenId, timeframe]);
 
   // ── RSI sub-chart ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -542,6 +640,19 @@ export function CandleChart({ tokenId }: CandleChartProps) {
           RSI
         </button>
 
+        {/* Cumulative delta */}
+        <button
+          onClick={() => setShowDelta((v) => !v)}
+          className={cn(
+            "px-1.5 py-0.5 text-xs rounded transition-colors border",
+            showDelta
+              ? "text-sky-400 border-sky-500/40"
+              : "text-slate-600 border-transparent"
+          )}
+        >
+          Δ Flow
+        </button>
+
         <div className="w-px h-4 bg-[#252a38]" />
 
         {/* Drawing tools */}
@@ -609,6 +720,19 @@ export function CandleChart({ tokenId }: CandleChartProps) {
             RSI(14)
           </div>
           <div ref={rsiContainerRef} className="w-full h-full" />
+        </div>
+      )}
+
+      {/* ── Cumulative Delta sub-panel ── */}
+      {showDelta && (
+        <div className="h-28 border-t border-[#252a38] relative shrink-0">
+          <div className="absolute top-1 left-2 text-[10px] text-slate-600 z-10 pointer-events-none">
+            Δ Order Flow
+          </div>
+          <div className="absolute top-1 right-2 text-[10px] text-slate-600 z-10 pointer-events-none">
+            blue = cum. delta · bars = net flow/period
+          </div>
+          <div ref={deltaContainerRef} className="w-full h-full" />
         </div>
       )}
     </div>

@@ -5,6 +5,7 @@ import { OrderBook } from "@/components/orderbook/order-book";
 import { TradesFeed } from "@/components/orderbook/trades-feed";
 import { DepthChart } from "@/components/charts/depth-chart";
 import { MarketHeader } from "./market-header";
+import { MarketAnalysisPanel } from "@/components/market/analysis-panel";
 import { ChartSkeleton } from "@/components/ui/loading-skeleton";
 import { notFound } from "next/navigation";
 
@@ -61,6 +62,17 @@ export default async function MarketPage({ params }: PageProps) {
           <Suspense fallback={<ChartSkeleton />}>
             <CandleChart tokenId={tokenId} title={market.question} />
           </Suspense>
+          <MarketAnalysisPanel
+            tokenId={tokenId}
+            marketPrice={
+              market.lastTradePrice ??
+              (market.bestBid != null && market.bestAsk != null
+                ? (market.bestBid + market.bestAsk) / 2
+                : 0.5)
+            }
+            question={market.question}
+            category={market.category ?? ""}
+          />
         </div>
 
         {/* Right sidebar: order book, depth chart, trades */}

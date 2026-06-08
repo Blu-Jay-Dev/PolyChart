@@ -6,6 +6,7 @@ import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PortfolioCurve } from "@/components/portfolio/portfolio-curve";
 import { PositionsTable } from "@/components/portfolio/positions-table";
+import { CorrelationView } from "@/components/portfolio/correlation-view";
 import { formatUSD } from "@/lib/utils";
 import type { PortfolioSummary } from "@/lib/polymarket/types";
 import { cn } from "@/lib/utils";
@@ -187,6 +188,11 @@ export default function PortfolioPage() {
                 ))}
               </div>
             </Card>
+          )}
+
+          {/* Correlation / concentration analysis */}
+          {portfolio.positions.length > 1 && (
+            <CorrelationView positions={portfolio.positions} />
           )}
 
           {/* Positions table */}
