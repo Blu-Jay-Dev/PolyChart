@@ -40,7 +40,7 @@ export function PositionsTable({ positions }: PositionsTableProps) {
             >
               <td className="py-2 px-3">
                 <Link
-                  href={`/market/${pos.asset}`}
+                  href={`/market/${pos.market}`}
                   className="text-slate-200 hover:text-blue-400 truncate block max-w-[200px] transition-colors"
                 >
                   {pos.market}

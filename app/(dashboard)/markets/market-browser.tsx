@@ -5,12 +5,43 @@ import Link from "next/link";
 import { Search, Star, StarOff } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Sparkline } from "@/components/charts/sparkline";
+import { MarketSparkline } from "@/components/charts/market-sparkline";
 import { formatVolume, formatPrice, formatRelativeTime, categoryColor } from "@/lib/utils";
 import type { Market } from "@/lib/polymarket/types";
 import { cn } from "@/lib/utils";
 
 const CATEGORIES = ["", "politics", "crypto", "sports", "macro", "tech", "science"];
+
+// localStorage key for persisting watchlist without requiring auth
+const LS_KEY = "poly_watchlist";
+
+interface StoredWatchlistItem {
+  market_id: string;
+  market_title: string | null;
+  added_at: string;
+}
+
+function loadLocalWatchlist(): Set<string> {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return new Set();
+    const items: StoredWatchlistItem[] = JSON.parse(raw);
+    return new Set(items.map((i) => i.market_id));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveLocalWatchlist(ids: Set<string>, titles: Map<string, string>) {
+  const items: StoredWatchlistItem[] = [...ids].map((id) => ({
+    market_id: id,
+    market_title: titles.get(id) ?? null,
+    added_at: new Date().toISOString(),
+  }));
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(items));
+  } catch {}
+}
 
 export function MarketBrowser() {
   const [markets, setMarkets] = useState<Market[]>([]);
@@ -19,6 +50,8 @@ export function MarketBrowser() {
   const [category, setCategory] = useState("");
   const [order, setOrder] = useState("volume");
   const [watchlisted, setWatchlisted] = useState<Set<string>>(new Set());
+  // Cache titles so localStorage items stay human-readable
+  const [titleCache, setTitleCache] = useState<Map<string, string>>(new Map());
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
   // Debounce search
@@ -50,14 +83,25 @@ export function MarketBrowser() {
     fetchMarkets();
   }, [fetchMarkets]);
 
-  // Load watchlist
+  // Load watchlist — localStorage first (instant), then API (authoritative if authed)
   useEffect(() => {
+    setWatchlisted(loadLocalWatchlist());
+
     fetch("/api/watchlist")
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (Array.isArray(data)) {
-          setWatchlisted(new Set(data.map((w: { market_id: string }) => w.market_id)));
-        }
+        if (!Array.isArray(data)) return;
+        const ids = new Set<string>(data.map((w: { market_id: string }) => w.market_id));
+        const titles = new Map<string, string>(
+          data.map((w: { market_id: string; market_title: string | null }) => [
+            w.market_id,
+            w.market_title ?? "",
+          ])
+        );
+        setWatchlisted(ids);
+        setTitleCache((prev) => new Map([...prev, ...titles]));
+        // Persist API result to localStorage so it survives logout
+        saveLocalWatchlist(ids, titles);
       })
       .catch(() => {});
   }, []);
@@ -65,29 +109,35 @@ export function MarketBrowser() {
   const toggleWatchlist = async (market: Market, tokenId: string) => {
     const isWatched = watchlisted.has(tokenId);
     const next = new Set(watchlisted);
+
     if (isWatched) {
       next.delete(tokenId);
-      setWatchlisted(next);
-      await fetch(`/api/watchlist?market_id=${tokenId}`, { method: "DELETE" });
     } else {
       next.add(tokenId);
-      setWatchlisted(next);
-      await fetch("/api/watchlist", {
+      setTitleCache((prev) => new Map(prev).set(tokenId, market.question));
+    }
+
+    setWatchlisted(next);
+    saveLocalWatchlist(next, new Map([...titleCache, [tokenId, market.question]]));
+
+    // Best-effort API sync (silently ignore errors with placeholder credentials)
+    if (isWatched) {
+      fetch(`/api/watchlist?market_id=${tokenId}`, { method: "DELETE" }).catch(() => {});
+    } else {
+      fetch("/api/watchlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ market_id: tokenId, market_title: market.question }),
-      });
+      }).catch(() => {});
     }
   };
 
   // Parse clobTokenIds and outcomes from JSON strings returned by Gamma API
   const yesTokenInfo = (m: Market): { token_id: string; price: number } | null => {
-    // Prefer legacy tokens array if present
     if (m.tokens && m.tokens.length > 0) {
       const t = m.tokens.find((t) => t.outcome === "Yes") ?? m.tokens![0];
       return { token_id: t.token_id, price: t.price };
     }
-    // Parse Gamma API fields
     try {
       const ids: string[] = JSON.parse(m.clobTokenIds ?? "[]");
       const outcomes: string[] = JSON.parse(m.outcomes ?? "[]");
@@ -217,13 +267,9 @@ export function MarketBrowser() {
                   </span>
                 </div>
 
-                {/* 7d sparkline */}
+                {/* 7d sparkline — lazily fetched when row scrolls into view */}
                 <div className="flex items-center justify-end">
-                  <Sparkline
-                    data={[0.3, 0.35, 0.4, price * 0.9, price * 0.95, price]}
-                    width={80}
-                    height={24}
-                  />
+                  <MarketSparkline tokenId={tokenId} width={80} height={24} />
                 </div>
 
                 {/* Closes */}
