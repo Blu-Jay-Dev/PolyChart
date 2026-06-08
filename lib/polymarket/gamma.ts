@@ -41,13 +41,17 @@ export async function getMarkets(params?: {
   order?: string;
   volumeMin?: number;
 }): Promise<Market[]> {
+  // Gamma API defaults to ascending. Flip to descending for all sort fields
+  // except endDate ("closing soon") where ascending = soonest first.
+  const ascending = params?.order === "endDate" ? true : false;
+
   return gammaFetch<Market[]>("/markets", {
     limit: params?.limit ?? 100,
     offset: params?.offset ?? 0,
     ...(params?.active !== undefined ? { active: params.active } : {}),
     ...(params?.closed !== undefined ? { closed: params.closed } : {}),
     ...(params?.category ? { category: params.category } : {}),
-    ...(params?.order ? { order: params.order } : {}),
+    ...(params?.order ? { order: params.order, ascending } : {}),
     // Filter out zero-volume resolved markets; default 1000 USD
     volume_num_min: params?.volumeMin ?? 1000,
   });
